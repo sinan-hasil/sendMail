@@ -1,70 +1,188 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
 import { Container, Row, Col, Form, Button, Card, Alert, ProgressBar } from 'react-bootstrap';
+import * as XLSX from 'xlsx';
+import emailjs from '@emailjs/browser';
+
+emailjs.init("aIWawUe0dF3GmbZZS");
+
+interface EmailSenderState {
+  selectedFile: File | null;
+  emailList: string[];
+  emailTemplate: string;
+  isRunning: boolean;
+  currentIndex: number;
+  status: string;
+  alertVariant: 'info' | 'success' | 'warning' | 'danger';
+}
 
 const App = () => {
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [emailList, setEmailList] = useState([]);
-  const [emailTemplate, setEmailTemplate] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [status, setStatus] = useState('');
-  const [alertVariant, setAlertVariant] = useState('info');
+  const [state, setState] = useState<EmailSenderState>({
+    selectedFile: null,
+    emailList: [],
+    emailTemplate: '',
+    isRunning: false,
+    currentIndex: 0,
+    status: '',
+    alertVariant: 'info'
+  });
 
-  const handleFileSelect = (event) => {
-    const file = event.target.files[0];
-    setSelectedFile(file);
-    
-    setEmailList(['test1@mail.com', 'test2@mail.com', 'test3@mail.com']);
-    setStatus('Excel dosyası yüklendi. Mail listesi hazır.');
-    setAlertVariant('success');
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        const emailList = jsonData
+          .slice(1)
+          .map((row: any) => row[0])
+          .filter((email: string) => email && email.includes('@'));
+
+        console.log('Okunan email listesi:', emailList);
+
+        setState(prev => ({
+          ...prev,
+          selectedFile: file,
+          emailList,
+          status: `${emailList.length} adet email adresi yüklendi.`,
+          alertVariant: 'success'
+        }));
+      } catch (error) {
+        console.error('Excel okuma hatası:', error);
+        setState(prev => ({
+          ...prev,
+          status: 'Excel dosyası okunurken hata oluştu!',
+          alertVariant: 'danger'
+        }));
+      }
+    }
   };
 
-  useEffect(() => {
-    let interval;
-    if (isRunning && currentIndex < emailList.length) {
-      interval = setInterval(() => {
-        console.log(`Mail gönderiliyor: ${emailList[currentIndex]}`);
-        setStatus(`${emailList[currentIndex]} adresine mail gönderiliyor...`);
-        setCurrentIndex(prev => prev + 1);
-      }, 2000);
-    } else if (currentIndex >= emailList.length && isRunning) {
-      setIsRunning(false);
-      setStatus('Tüm mailler gönderildi!');
-      setAlertVariant('success');
-    }
+  const sendEmail = async (toEmail: string, template: string) => {
+    try {
+      const templateParams = {
+        to_name: toEmail.split('@')[0], 
+        to_email: toEmail,
+        message: template,
+        from_name: 'Mail Gönderici',
+        reply_to: 'sinannovatech@gmail.com'
+      };
 
-    return () => clearInterval(interval);
-  }, [isRunning, currentIndex, emailList]);
+      console.log('Mail gönderiliyor:', templateParams);
+
+      const response = await emailjs.send(
+        'service_e3ug5rd',
+        'template_eez56ls',
+        templateParams
+      );
+
+      if (response.status !== 200) {
+        throw new Error(`Email gönderimi başarısız: ${response.text}`);
+      }
+
+      console.log('Mail gönderim cevabı:', response);
+      return true;
+    } catch (error) {
+      console.error('Mail gönderme hatası:', error);
+      return false;
+    }
+  };
 
   const startSending = () => {
-    if (emailTemplate.trim() === '') {
-      setStatus('Lütfen bir mail şablonu girin!');
-      setAlertVariant('warning');
+    if (state.emailTemplate.trim() === '') {
+      setState(prev => ({
+        ...prev,
+        status: 'Lütfen bir mail şablonu girin!',
+        alertVariant: 'warning'
+      }));
       return;
     }
-    if (emailList.length === 0) {
-      setStatus('Lütfen önce bir Excel dosyası seçin!');
-      setAlertVariant('warning');
+    if (state.emailList.length === 0) {
+      setState(prev => ({
+        ...prev,
+        status: 'Lütfen önce bir Excel dosyası seçin!',
+        alertVariant: 'warning'
+      }));
       return;
     }
-    setIsRunning(true);
-    setCurrentIndex(0);
-    setAlertVariant('info');
+    setState(prev => ({
+      ...prev,
+      isRunning: true,
+      currentIndex: 0,
+      alertVariant: 'info',
+      status: 'Mail gönderimi başlıyor...'
+    }));
   };
 
   const stopSending = () => {
-    setIsRunning(false);
-    setStatus('Mail gönderimi durduruldu.');
-    setAlertVariant('warning');
+    setState(prev => ({
+      ...prev,
+      isRunning: false,
+      status: 'Mail gönderimi durduruldu.',
+      alertVariant: 'warning'
+    }));
   };
 
   const getProgress = () => {
-    return (currentIndex / emailList.length) * 100;
+    if (state.emailList.length === 0) return 0;
+    return Math.round((state.currentIndex / state.emailList.length) * 100);
   };
 
+  useEffect(() => {
+    let interval = null;
+
+    if (state.isRunning && state.currentIndex < state.emailList.length) {
+      interval = setInterval(async () => {
+        const currentEmail = state.emailList[state.currentIndex];
+        
+        setState(prev => ({
+          ...prev,
+          status: `${currentEmail} adresine mail gönderiliyor... (${state.currentIndex + 1}/${state.emailList.length})`,
+          alertVariant: 'info'
+        }));
+
+        try {
+          const success = await sendEmail(currentEmail, state.emailTemplate);
+          
+          if (success) {
+            setState(prev => ({
+              ...prev,
+              status: `${currentEmail} adresine mail başarıyla gönderildi!`,
+              currentIndex: prev.currentIndex + 1,
+              alertVariant: 'success'
+            }));
+          } else {
+            throw new Error('Mail gönderilemedi');
+          }
+        } catch (error) {
+          console.error('Mail gönderme hatası:', error);
+          setState(prev => ({
+            ...prev,
+            status: `${currentEmail} adresine mail gönderilirken hata oluştu!`,
+            isRunning: false,
+            alertVariant: 'danger'
+          }));
+        }
+      }, 2000);
+    } else if (state.currentIndex >= state.emailList.length && state.isRunning) {
+      setState(prev => ({
+        ...prev,
+        isRunning: false,
+        status: 'Tüm mailler başarıyla gönderildi!',
+        alertVariant: 'success'
+      }));
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [state.isRunning, state.currentIndex, state.emailList, state.emailTemplate]);
+
   return (
-    <>
-      <Container className="mt-5">
+    <Container className="mt-5">
       <Row className="justify-content-center">
         <Col md={8}>
           <Card>
@@ -78,7 +196,7 @@ const App = () => {
                 <div className="d-flex align-items-center gap-2">
                   <Button 
                     variant="outline-primary"
-                    onClick={() => document.getElementById('file-upload').click()}
+                    onClick={() => document.getElementById('file-upload')?.click()}
                   >
                     <i className="bi bi-upload me-2"></i>
                     Dosya Seç
@@ -90,9 +208,9 @@ const App = () => {
                     className="d-none"
                     onChange={handleFileSelect}
                   />
-                  {selectedFile && (
+                  {state.selectedFile && (
                     <span className="text-muted">
-                      {selectedFile.name}
+                      {state.selectedFile.name} ({state.emailList.length} email)
                     </span>
                   )}
                 </div>
@@ -103,8 +221,8 @@ const App = () => {
                 <Form.Control
                   as="textarea"
                   rows={4}
-                  value={emailTemplate}
-                  onChange={(e) => setEmailTemplate(e.target.value)}
+                  value={state.emailTemplate}
+                  onChange={(e) => setState(prev => ({...prev, emailTemplate: e.target.value}))}
                   placeholder="Mail içeriğini buraya yazın..."
                 />
               </Form.Group>
@@ -113,7 +231,7 @@ const App = () => {
                 <Button
                   variant="success"
                   onClick={startSending}
-                  disabled={isRunning}
+                  disabled={state.isRunning || state.emailList.length === 0}
                 >
                   <i className="bi bi-play-fill me-2"></i>
                   Göndermeye Başla
@@ -121,29 +239,29 @@ const App = () => {
                 <Button
                   variant="danger"
                   onClick={stopSending}
-                  disabled={!isRunning}
+                  disabled={!state.isRunning}
                 >
                   <i className="bi bi-stop-fill me-2"></i>
                   Durdur
                 </Button>
               </div>
 
-              {status && (
-                <Alert variant={alertVariant} className="mb-3">
-                  {status}
+              {state.status && (
+                <Alert variant={state.alertVariant} className="mb-3">
+                  {state.status}
                 </Alert>
               )}
 
-              {isRunning && (
+              {state.isRunning && (
                 <div>
                   <ProgressBar 
                     animated 
                     now={getProgress()} 
-                    label={`${Math.round(getProgress())}%`}
+                    label={`${getProgress()}%`}
                     className="mb-2"
                   />
                   <small className="text-muted">
-                    İşlenen: {currentIndex} / {emailList.length}
+                    İşlenen: {state.currentIndex} / {state.emailList.length}
                   </small>
                 </div>
               )}
@@ -152,8 +270,7 @@ const App = () => {
         </Col>
       </Row>
     </Container>
-    </>
-  )
+  );
 }
 
-export default App
+export default App;
