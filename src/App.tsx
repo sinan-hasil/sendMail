@@ -1,185 +1,145 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from 'react';
-import { Container, Row, Col, Form, Button, Card, Alert, ProgressBar } from 'react-bootstrap';
-import * as XLSX from 'xlsx';
+import { Container, Row, Col, Form, Button, Card, Alert } from 'react-bootstrap';
 import emailjs from '@emailjs/browser';
 
-emailjs.init("aIWawUe0dF3GmbZZS");
+// EmailJS yapılandırması
+const PUBLIC_KEY = "ZEbu82HJPmDxaR-ig";
+const SERVICE_ID = 'service_lwr2od9';
+const TEMPLATE_ID = 'template_vl9913g';
 
-interface EmailSenderState {
-  selectedFile: File | null;
-  emailList: string[];
-  emailTemplate: string;
-  isRunning: boolean;
-  currentIndex: number;
-  status: string;
-  alertVariant: 'info' | 'success' | 'warning' | 'danger';
-}
+// Google Sheets yapılandırması
+const SPREADSHEET_ID = '16-IedC3vpcuZkDeBElzjv-1iOSaae88Y6kfOXei48Lw';
+const SHEET_NAME = 'Sayfa1';
+const API_KEY = 'AIzaSyCKe5ftPXtLeXD_kgH5Eg37yQ9rOP7ZEHI';
 
 const App = () => {
-  const [state, setState] = useState<EmailSenderState>({
-    selectedFile: null,
-    emailList: [],
-    emailTemplate: '',
-    isRunning: false,
-    currentIndex: 0,
-    status: '',
-    alertVariant: 'info'
-  });
+  const [emailTemplate, setEmailTemplate] = useState('');
+  const [status, setStatus] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [emailList, setEmailList] = useState<string[]>([]);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      try {
-        const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data);
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        
-        const emailList = jsonData
-          .slice(1)
-          .map((row: any) => row[0])
-          .filter((email: string) => email && email.includes('@'));
+  useEffect(() => {
+    // EmailJS'i initialize et
+    try {
+      emailjs.init(PUBLIC_KEY);
+    } catch (err) {
+      console.error('EmailJS initialization error:', err);
+      setError('EmailJS başlatılamadı!');
+    }
+  }, []);
 
-        console.log('Okunan email listesi:', emailList);
-
-        setState(prev => ({
-          ...prev,
-          selectedFile: file,
-          emailList,
-          status: `${emailList.length} adet email adresi yüklendi.`,
-          alertVariant: 'success'
-        }));
-      } catch (error) {
-        console.error('Excel okuma hatası:', error);
-        setState(prev => ({
-          ...prev,
-          status: 'Excel dosyası okunurken hata oluştu!',
-          alertVariant: 'danger'
-        }));
+  const fetchEmails = async () => {
+    try {
+      setError(null);
+      const response = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${SHEET_NAME}!A:A?key=${API_KEY}`
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      const data = await response.json();
+      
+      if (!data.values) {
+        throw new Error('Google Sheets\'ten veri alınamadı');
+      }
+
+      const emails = data.values
+        .slice(1)
+        .map((row: any[]) => row[0]?.trim())
+        .filter((email: string) => {
+          // Basit email doğrulama
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          return email && emailRegex.test(email);
+        });
+
+      setEmailList(emails);
+      setStatus(`${emails.length} adet geçerli mail adresi yüklendi.`);
+    } catch (error: any) {
+      const errorMessage = `Mail listesi yüklenirken hata: ${error.message}`;
+      setError(errorMessage);
+      console.error('Fetch error:', error);
+      setEmailList([]);
     }
   };
 
-  const sendEmail = async (toEmail: string, template: string) => {
+  useEffect(() => {
+    if (SPREADSHEET_ID && API_KEY) {
+      fetchEmails();
+      
+      const interval = autoRefresh ? setInterval(fetchEmails, 5 * 60 * 1000) : null;
+      return () => {
+        if (interval) clearInterval(interval);
+      };
+    } else {
+      setError('Google Sheets yapılandırması eksik!');
+    }
+  }, [autoRefresh]);
+
+  const sendEmail = async (email: string): Promise<boolean> => {
     try {
       const templateParams = {
-        to_name: toEmail.split('@')[0], 
-        to_email: toEmail,
-        message: template,
-        from_name: 'Mail Gönderici',
-        reply_to: 'sinan.hasil61@gmail.com'
+        to_email: email,
+        message: emailTemplate,
+        // Template'inizde kullanılan diğer parametreleri ekleyin
+        from_name: "Novatech Yazılım ve Teknoloji", // EmailJS template'inize göre ayarlayın
+        subject: "Yazılım Çözümlerimizle İşinizi Geliştirin",     // EmailJS template'inize göre ayarlayın
       };
 
-      console.log('Mail gönderiliyor:', templateParams);
-
       const response = await emailjs.send(
-        'service_e3ug5rd',
-        'template_eez56ls',
+        SERVICE_ID,
+        TEMPLATE_ID,
         templateParams
       );
 
-      if (response.status !== 200) {
-        throw new Error(`Email gönderimi başarısız: ${response.text}`);
-      }
-
-      console.log('Mail gönderim cevabı:', response);
-      return true;
+      return response.status === 200;
     } catch (error) {
-      console.error('Mail gönderme hatası:', error);
+      console.error(`${email} adresine mail gönderilirken hata:`, error);
       return false;
     }
   };
 
-  const startSending = () => {
-    if (state.emailTemplate.trim() === '') {
-      setState(prev => ({
-        ...prev,
-        status: 'Lütfen bir mail şablonu girin!',
-        alertVariant: 'warning'
-      }));
+  const sendEmails = async () => {
+    if (!emailTemplate.trim()) {
+      setError('Lütfen bir mail şablonu girin!');
       return;
     }
-    if (state.emailList.length === 0) {
-      setState(prev => ({
-        ...prev,
-        status: 'Lütfen önce bir Excel dosyası seçin!',
-        alertVariant: 'warning'
-      }));
+
+    if (emailList.length === 0) {
+      setError('Mail listesi boş!');
       return;
     }
-    setState(prev => ({
-      ...prev,
-      isRunning: true,
-      currentIndex: 0,
-      alertVariant: 'info',
-      status: 'Mail gönderimi başlıyor...'
-    }));
-  };
 
-  const stopSending = () => {
-    setState(prev => ({
-      ...prev,
-      isRunning: false,
-      status: 'Mail gönderimi durduruldu.',
-      alertVariant: 'warning'
-    }));
-  };
+    setProcessing(true);
+    setError(null);
+    setStatus(`${emailList.length} adet mail gönderilmeye başlanıyor...`);
 
-  const getProgress = () => {
-    if (state.emailList.length === 0) return 0;
-    return Math.round((state.currentIndex / state.emailList.length) * 100);
-  };
+    let successCount = 0;
+    let failCount = 0;
 
-  useEffect(() => {
-    let interval = null;
+    for (let i = 0; i < emailList.length; i++) {
+      const email = emailList[i];
+      setStatus(`${email} adresine mail gönderiliyor... (${i + 1}/${emailList.length})`);
+      
+      const success = await sendEmail(email);
+      
+      if (success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
 
-    if (state.isRunning && state.currentIndex < state.emailList.length) {
-      interval = setInterval(async () => {
-        const currentEmail = state.emailList[state.currentIndex];
-        
-        setState(prev => ({
-          ...prev,
-          status: `${currentEmail} adresine mail gönderiliyor... (${state.currentIndex + 1}/${state.emailList.length})`,
-          alertVariant: 'info'
-        }));
-
-        try {
-          const success = await sendEmail(currentEmail, state.emailTemplate);
-          
-          if (success) {
-            setState(prev => ({
-              ...prev,
-              status: `${currentEmail} adresine mail başarıyla gönderildi!`,
-              currentIndex: prev.currentIndex + 1,
-              alertVariant: 'success'
-            }));
-          } else {
-            throw new Error('Mail gönderilemedi');
-          }
-        } catch (error) {
-          console.error('Mail gönderme hatası:', error);
-          setState(prev => ({
-            ...prev,
-            status: `${currentEmail} adresine mail gönderilirken hata oluştu!`,
-            isRunning: false,
-            alertVariant: 'danger'
-          }));
-        }
-      }, 2000);
-    } else if (state.currentIndex >= state.emailList.length && state.isRunning) {
-      setState(prev => ({
-        ...prev,
-        isRunning: false,
-        status: 'Tüm mailler başarıyla gönderildi!',
-        alertVariant: 'success'
-      }));
+      // Rate limiting: Her mail sonrası 1 saniye bekle
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [state.isRunning, state.currentIndex, state.emailList, state.emailTemplate]);
+    setStatus(`İşlem tamamlandı! ${successCount} mail başarıyla gönderildi, ${failCount} mail gönderilemedi.`);
+    setProcessing(false);
+  };
 
   return (
     <Container className="mt-5">
@@ -187,83 +147,69 @@ const App = () => {
         <Col md={8}>
           <Card>
             <Card.Header as="h5" className="bg-primary text-white">
-              <i className="bi bi-envelope-fill me-2"></i>
-              Otomatik Mail Gönderici
+              Toplu Mail Gönderici
             </Card.Header>
             <Card.Body>
-              <Form.Group className="mb-4">
-                <Form.Label>Excel Dosyası Seç</Form.Label>
-                <div className="d-flex align-items-center gap-2">
-                  <Button 
-                    variant="outline-primary"
-                    onClick={() => document.getElementById('file-upload')?.click()}
-                  >
-                    <i className="bi bi-upload me-2"></i>
-                    Dosya Seç
-                  </Button>
-                  <Form.Control
-                    id="file-upload"
-                    type="file"
-                    accept=".xlsx,.xls"
-                    className="d-none"
-                    onChange={handleFileSelect}
-                  />
-                  {state.selectedFile && (
-                    <span className="text-muted">
-                      {state.selectedFile.name} ({state.emailList.length} email)
-                    </span>
-                  )}
+              {error && (
+                <Alert variant="danger" className="mb-3">
+                  {error}
+                </Alert>
+              )}
+              
+              <div className="mb-4">
+                <div className="d-flex justify-content-between align-items-center">
+                  <h6>Google Sheets Mail Listesi</h6>
+                  <div>
+                    <Form.Check
+                      type="switch"
+                      id="auto-refresh"
+                      label="Otomatik Güncelle"
+                      checked={autoRefresh}
+                      onChange={(e) => setAutoRefresh(e.target.checked)}
+                      className="me-2 d-inline-block"
+                    />
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      onClick={fetchEmails}
+                      disabled={processing}
+                    >
+                      Listeyi Güncelle
+                    </Button>
+                  </div>
                 </div>
-              </Form.Group>
+                {emailList.length > 0 && (
+                  <small className="text-muted">
+                    Yüklenen mail sayısı: {emailList.length}
+                  </small>
+                )}
+              </div>
 
               <Form.Group className="mb-4">
-                <Form.Label>Mail Şablonu</Form.Label>
+                <Form.Label>Mail İçeriği</Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={4}
-                  value={state.emailTemplate}
-                  onChange={(e) => setState(prev => ({...prev, emailTemplate: e.target.value}))}
+                  value={emailTemplate}
+                  onChange={(e) => setEmailTemplate(e.target.value)}
                   placeholder="Mail içeriğini buraya yazın..."
+                  disabled={processing}
                 />
               </Form.Group>
 
-              <div className="d-flex gap-2 mb-4">
-                <Button
-                  variant="success"
-                  onClick={startSending}
-                  disabled={state.isRunning || state.emailList.length === 0}
-                >
-                  <i className="bi bi-play-fill me-2"></i>
-                  Göndermeye Başla
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={stopSending}
-                  disabled={!state.isRunning}
-                >
-                  <i className="bi bi-stop-fill me-2"></i>
-                  Durdur
-                </Button>
-              </div>
+              <Button
+                variant="success"
+                onClick={sendEmails}
+                disabled={processing || emailList.length === 0}
+                className="mb-4"
+              >
+                {processing ? 'Gönderiliyor...' : 'Mailleri Gönder'}
+              </Button>
 
-              {state.status && (
-                <Alert variant={state.alertVariant} className="mb-3">
-                  {state.status}
+              {status && (
+                <Alert variant="info" className="mb-3">
+                  {status}
                 </Alert>
-              )}
-
-              {state.isRunning && (
-                <div>
-                  <ProgressBar 
-                    animated 
-                    now={getProgress()} 
-                    label={`${getProgress()}%`}
-                    className="mb-2"
-                  />
-                  <small className="text-muted">
-                    İşlenen: {state.currentIndex} / {state.emailList.length}
-                  </small>
-                </div>
               )}
             </Card.Body>
           </Card>
