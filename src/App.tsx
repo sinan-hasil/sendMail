@@ -68,7 +68,7 @@ const App = () => {
         to_email: toEmail,
         message: template,
         from_name: 'Mail Gönderici',
-        reply_to: 'sinannovatech@gmail.com'
+        reply_to: 'sinan.hasil61@gmail.com'
       };
 
       console.log('Mail gönderiliyor:', templateParams);
