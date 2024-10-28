@@ -3,13 +3,11 @@ import { useState, useEffect } from 'react';
 import { Container, Row, Col, Form, Button, Card, Alert } from 'react-bootstrap';
 import emailjs from '@emailjs/browser';
 
-// EmailJS yapılandırması
 const PUBLIC_KEY = "ZEbu82HJPmDxaR-ig";
 const SERVICE_ID = 'service_lwr2od9';
 const TEMPLATE_ID = 'template_vl9913g';
 
-// Google Sheets yapılandırması
-const SPREADSHEET_ID = '16-IedC3vpcuZkDeBElzjv-1iOSaae88Y6kfOXei48Lw';
+const SPREADSHEET_ID = '1PPBF_pl3-r7PmUVpTzFE0kJ7YRO9yGkC0p05M6TF3hk';
 const SHEET_NAME = 'Sayfa1';
 const API_KEY = 'AIzaSyCKe5ftPXtLeXD_kgH5Eg37yQ9rOP7ZEHI';
 
@@ -22,7 +20,6 @@ const App = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // EmailJS'i initialize et
     try {
       emailjs.init(PUBLIC_KEY);
     } catch (err) {
@@ -41,7 +38,7 @@ const App = () => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-
+      
       const data = await response.json();
       
       if (!data.values) {
@@ -52,7 +49,6 @@ const App = () => {
         .slice(1)
         .map((row: any[]) => row[0]?.trim())
         .filter((email: string) => {
-          // Basit email doğrulama
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           return email && emailRegex.test(email);
         });
@@ -85,9 +81,13 @@ const App = () => {
       const templateParams = {
         to_email: email,
         message: emailTemplate,
-        // Template'inizde kullanılan diğer parametreleri ekleyin
-        from_name: "Novatech Yazılım ve Teknoloji", // EmailJS template'inize göre ayarlayın
-        subject: "Yazılım Çözümlerimizle İşinizi Geliştirin",     // EmailJS template'inize göre ayarlayın
+        from_name: "Code Merkezi Yazılım ve Teknoloji", 
+        subject: "Yazılım Çözümlerimizle İşinizi Geliştirin",
+        to_name: "",
+        recipient: "",
+        email: "",
+        bcc: "",
+        cc: ""
       };
 
       const response = await emailjs.send(
@@ -95,6 +95,8 @@ const App = () => {
         TEMPLATE_ID,
         templateParams
       );
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       return response.status === 200;
     } catch (error) {
@@ -132,9 +134,6 @@ const App = () => {
       } else {
         failCount++;
       }
-
-      // Rate limiting: Her mail sonrası 1 saniye bekle
-      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     setStatus(`İşlem tamamlandı! ${successCount} mail başarıyla gönderildi, ${failCount} mail gönderilemedi.`);
